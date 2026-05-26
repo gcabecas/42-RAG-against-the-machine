@@ -37,13 +37,17 @@ def symbol_span(starts: list[int], node: ast.AST) -> tuple[int, int] | None:
 def chunk_python(file: File, max_chunk_size: int) -> list[Chunk]:
     try:
         tree = ast.parse(file.text, filename=file.path.as_posix())
-    except SyntaxError:
+    except (SyntaxError, ValueError):
         return chunk_text(file, max_chunk_size)
 
     starts = line_starts(file.text)
     chunks: list[Chunk] = []
     for node in tree.body:
-        if not isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+        if not isinstance(
+            node,
+            (ast.ClassDef,
+             ast.FunctionDef,
+             ast.AsyncFunctionDef)):
             continue
         span = symbol_span(starts, node)
         if span is None:

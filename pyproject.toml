@@ -4,10 +4,12 @@ version = "1.0.0"
 description = "rag"
 requires-python = ">=3.10"
 dependencies = [
+    "bm25s>=0.3.9",
     "fire",
     "flake8",
     "mypy",
-    "pydantic"
+    "pydantic",
+    "tqdm>=4.67.3",
 ]
 
 [build-system]

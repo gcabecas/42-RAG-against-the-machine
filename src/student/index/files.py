@@ -29,7 +29,14 @@ def list_file(root: Path) -> list[File]:
 
     file_list = []
 
-    for path in sorted(root.rglob("*")):
+    try:
+        paths = sorted(root.rglob("*"))
+    except OSError as error:
+        raise ValueError(
+            f"unable to scan repository root {root}: {error}"
+        ) from error
+
+    for path in paths:
         if not path.is_file():
             continue
         text = read_text(path)
