@@ -1,5 +1,3 @@
-"""Entrypoint for `python -m student`."""
-
 from student.app.fire import main
 
 
