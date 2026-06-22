@@ -12,7 +12,7 @@ def gen_bm25(chunk_list: list[Chunk], output_dir: Path) -> None:
         raise ValueError("cannot build a BM25 index without chunks")
 
     tokenized_chunks = [
-        tokenize(chunk.text)
+        tokenize(f"{chunk.file_path} {chunk.text}")
         for chunk in tqdm(chunk_list, desc="Tokenizing chunks", unit="chunk")
     ]
     retriever = bm25s.BM25()
