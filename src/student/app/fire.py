@@ -1,10 +1,11 @@
 import fire as fire_lib
 
+from student.app.evaluate import EvaluateCli
 from student.app.index import IndexCli
 from student.app.search import SearchCli
 
 
-class StudentCli(IndexCli, SearchCli):
+class StudentCli(IndexCli, SearchCli, EvaluateCli):
     pass
 
 

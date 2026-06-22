@@ -10,3 +10,10 @@ class BaseCli:
     def _error(self, command: str, message: str) -> NoReturn:
         print(f"{command}: error: {message}", file=sys.stderr)
         raise SystemExit(1)
+
+    def _parse_k(self, k: int) -> int:
+        if not isinstance(k, int) or isinstance(k, bool):
+            raise ValueError("k must be an integer")
+        if k < 1:
+            raise ValueError("k must be at least 1")
+        return k

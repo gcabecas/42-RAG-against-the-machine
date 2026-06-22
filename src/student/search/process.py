@@ -17,18 +17,10 @@ class SearchIndex:
 
 def load_chunks(processed_dir: Path) -> list[dict[str, object]]:
     chunks_path = processed_dir / "chunks" / "chunks.json"
-    try:
-        data = json.loads(chunks_path.read_text(encoding="utf-8"))
-    except OSError as error:
-        raise ValueError(
-            f"unable to read chunks from {chunks_path}: {error}") from error
-    except json.JSONDecodeError as error:
-        raise ValueError(f"invalid chunks JSON in {chunks_path}: {error}") \
-            from error
-
+    data = json.loads(chunks_path.read_text())
     if not isinstance(data, list):
         raise ValueError(f"{chunks_path}: expected a list")
-    return data
+    return cast(list[dict[str, object]], data)
 
 
 def load_bm25(processed_dir: Path) -> Any:
@@ -42,21 +34,6 @@ def load_search_index(processed_dir: Path) -> SearchIndex:
     return SearchIndex(
         chunks=load_chunks(processed_dir),
         retriever=load_bm25(processed_dir),
-    )
-
-
-def source_from_chunk(chunk: dict[str, object]) -> MinimalSource:
-    file_path = chunk["file_path"]
-    first = chunk["first_character_index"]
-    last = chunk["last_character_index"]
-    if not isinstance(file_path, str):
-        raise ValueError("chunk file_path must be a string")
-    if not isinstance(first, int) or not isinstance(last, int):
-        raise ValueError("chunk offsets must be integers")
-    return MinimalSource(
-        file_path=file_path,
-        first_character_index=first,
-        last_character_index=last,
     )
 
 
@@ -83,7 +60,7 @@ def process(
         question_id=question_id,
         question_str=query,
         retrieved_sources=[
-            source_from_chunk(chunk)
+            MinimalSource.model_validate(chunk)
             for chunk in retrieved_chunks
         ],
     )
