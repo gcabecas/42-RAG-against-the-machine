@@ -5,6 +5,7 @@ from tqdm import tqdm
 
 from student.answer.context import make_contexts
 from student.answer.generator import load_answer_model
+from student.answer.process import MAX_ANSWER_CONTEXTS
 from student.answer.process import process as answer_process
 from student.app.base import BaseCli
 from student.common.models import (
@@ -31,6 +32,11 @@ class AnswerCli(BaseCli):
             top_k = self._parse_k(k)
         except ValueError as error:
             return self._error("answer", str(error))
+        if top_k > MAX_ANSWER_CONTEXTS:
+            return self._error(
+                "answer",
+                f"k must be at most {MAX_ANSWER_CONTEXTS}",
+            )
 
         try:
             processed_path = Path(processed_dir)
@@ -91,7 +97,7 @@ class AnswerCli(BaseCli):
             ]
             output = StudentSearchResultsAndAnswer(
                 search_results=answers,
-                k=student_results.k,
+                k=min(student_results.k, MAX_ANSWER_CONTEXTS),
             ).model_dump()
             save_path = Path(save_directory) / search_results_path.name
             save_path.parent.mkdir(parents=True, exist_ok=True)

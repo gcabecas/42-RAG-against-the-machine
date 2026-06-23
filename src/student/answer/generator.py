@@ -4,6 +4,30 @@ from typing import Any, cast
 
 from student.answer.context import SourceContext
 from student.answer.prompt import build_messages
+from student.common.tokenizer import tokenize
+
+IGNORED_SOURCE_TOKENS = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "what",
+    "how",
+    "which",
+    "does",
+    "are",
+    "you",
+    "can",
+    "used",
+    "using",
+    "that",
+    "this",
+    "from",
+    "when",
+    "where",
+    "vllm",
+}
+SOURCE_CITATION_PATTERN = re.compile(r"\[source\s+([0-9]+)\]", re.IGNORECASE)
 
 
 @dataclass
@@ -33,7 +57,70 @@ class AnswerGenerator:
             generated_ids,
             skip_special_tokens=True,
         ))
-        return clean_answer(answer)
+        answer = clean_answer(answer)
+        return ensure_single_source_citation(question, answer, contexts)
+
+
+def ensure_single_source_citation(
+    question: str,
+    answer: str,
+    contexts: list[SourceContext],
+) -> str:
+    source_index = first_valid_source_citation(answer, len(contexts))
+    answer_without_citations = SOURCE_CITATION_PATTERN.sub("", answer).strip()
+
+    if not contexts:
+        return answer_without_citations
+
+    if source_index is None:
+        source_index = best_source_index(
+            question,
+            answer_without_citations,
+            contexts,
+        )
+
+    if not answer_without_citations:
+        return f"[source {source_index}]"
+    return f"{answer_without_citations} [source {source_index}]"
+
+
+def first_valid_source_citation(answer: str, context_count: int) -> int | None:
+    for match in SOURCE_CITATION_PATTERN.finditer(answer):
+        source_index = int(match.group(1))
+        if 1 <= source_index <= context_count:
+            return source_index
+    return None
+
+
+def best_source_index(
+    question: str,
+    answer: str,
+    contexts: list[SourceContext],
+) -> int:
+    question_tokens = important_tokens(question)
+    answer_tokens = important_tokens(answer)
+    best_index = 1
+    best_score = -1
+
+    for index, context in enumerate(contexts, start=1):
+        context_tokens = set(tokenize(context.text))
+        score = (
+            len(answer_tokens & context_tokens) * 2
+            + len(question_tokens & context_tokens)
+        )
+        if score > best_score:
+            best_score = score
+            best_index = index
+
+    return best_index
+
+
+def important_tokens(text: str) -> set[str]:
+    return {
+        token
+        for token in tokenize(text)
+        if len(token) > 2 and token not in IGNORED_SOURCE_TOKENS
+    }
 
 
 def clean_answer(answer: str) -> str:
@@ -48,6 +135,10 @@ def clean_answer(answer: str) -> str:
     answer = re.sub(r"\[([^\]]+)\]\((https?://[^)]+)\)", r"\1 \2", answer)
     answer = re.sub(r"\[([^\]]+)\]\(#[^)]+\)", r"\1", answer)
     answer = re.sub(r"\[([^\]]+)\]\[[^\]]+\]", r"\1", answer)
+    answer = re.sub(r"\s*\(?data/raw/[^)\s]+(?:\))?", "", answer)
+    answer = re.sub(r"\s+and\s+mention this", "", answer)
+    answer = answer.replace("```console", "").replace("```bash", "")
+    answer = answer.replace("```python", "").replace("```", "")
     answer = re.sub(
         r"\bvLLM(?=(metric|model|server|service|framework|deployment)\b)",
         "vLLM ",
@@ -59,10 +150,6 @@ def clean_answer(answer: str) -> str:
         r"\1 ",
         answer,
     )
-    citations = re.findall(r"\[source [0-9]+\]", answer)
-    if len(citations) > 1:
-        answer = re.sub(r"\s*\[source [0-9]+\]", "", answer)
-        answer = f"{answer.rstrip(' .')} {citations[0]}"
     return answer.strip()
 
 

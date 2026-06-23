@@ -1,137 +1,213 @@
+*This project has been created as part of the 42 curriculum by gcabecas.*
+
 # RAG Against the Machine
 
-RAG simple pour le repo vLLM : indexation des fichiers, recherche BM25,
-evaluation recall@k et generation de reponses avec `Qwen/Qwen3-0.6B`.
+## Description
 
-## Installation
+This project implements a small Retrieval-Augmented Generation system for the
+vLLM codebase. It indexes the repository, retrieves relevant code or
+documentation chunks with BM25, and uses `Qwen/Qwen3-0.6B` to generate answers
+grounded in the retrieved context.
+
+The goal is to answer questions about vLLM while also measuring retrieval
+quality with recall@k.
+
+## Instructions
+
+Install the dependencies:
 
 ```bash
 uv sync
-mkdir -p data/raw && unzip -q -n info/given/vllm-0.10.1.zip -d data/raw
 ```
 
-## Architecture
+Prepare the vLLM repository if it is not already extracted:
 
-Le pipeline est separe par famille de commande :
+```bash
+mkdir -p data/raw
+unzip -q -n info/given/vllm-0.10.1.zip -d data/raw
+```
 
-- `src/student/index/` : lecture des fichiers, chunking, index BM25
-- `src/student/search/` : chargement de l'index et retrieval top-k
-- `src/student/evaluate/` : calcul recall@k par overlap de sources
-- `src/student/answer/` : construction du contexte et appel Qwen
-- `src/student/app/` : commandes Fire exposees par famille
+Build the index:
 
-Flux principal :
+```bash
+uv run python -m student index --max_chunk_size 2000
+```
+
+Run a single search:
+
+```bash
+uv run python -m student search "How to configure OpenAI server?" --k 10
+```
+
+Answer a single question:
+
+```bash
+uv run python -m student answer "How to configure OpenAI server?" --k 10
+```
+
+Search a dataset:
+
+```bash
+uv run python -m student search_dataset \
+  --dataset_path data/datasets_public/public/AnsweredQuestions/dataset_docs_public.json \
+  --k 10 \
+  --save_directory data/output/search_results
+```
+
+Evaluate search results:
+
+```bash
+uv run python -m student evaluate \
+  --student_results_path data/output/search_results/dataset_docs_public.json \
+  --dataset_path data/datasets_public/public/AnsweredQuestions/dataset_docs_public.json \
+  --k 10
+```
+
+Generate answers from search results:
+
+```bash
+uv run python -m student answer_dataset \
+  --student_search_results_path data/output/search_results/dataset_docs_public.json \
+  --save_directory data/output/search_results_and_answer
+```
+
+The Makefile also exposes shortcuts:
+
+```bash
+make install
+make index
+make search QUERY="How to configure OpenAI server?" K=10
+make search_dataset DATASET_PATH=data/datasets_public/public/AnsweredQuestions/dataset_docs_public.json K=10
+make evaluate STUDENT_RESULTS_PATH=data/output/search_results/dataset_docs_public.json DATASET_PATH=data/datasets_public/public/AnsweredQuestions/dataset_docs_public.json K=10
+make answer QUERY="What is vLLM?" ANSWER_K=10
+make lint
+```
+
+## System Architecture
+
+The pipeline is split into five main parts:
+
+- `src/student/index/`: reads files, chunks them, and builds the BM25 index.
+- `src/student/search/`: loads the saved index and retrieves top-k chunks.
+- `src/student/evaluate/`: computes recall@k against annotated datasets.
+- `src/student/answer/`: builds the prompt context and calls Qwen.
+- `src/student/app/`: exposes the command-line interface with Python Fire.
+
+Data flow:
 
 ```text
-data/raw/vllm-0.10.1 -> index -> data/processed
-question -> search -> retrieved_sources
-retrieved_sources -> answer -> Qwen/Qwen3-0.6B -> answer
-retrieved_sources + dataset answered -> evaluate -> recall@k
+data/raw/vllm-0.10.1
+    -> index
+    -> data/processed/chunks + data/processed/bm25_index
+    -> search
+    -> retrieved_sources
+    -> answer
+    -> grounded natural language answer
 ```
 
-## Chunking
+## Chunking Strategy
 
-La taille maximale est configurable avec `MAX_CHUNK_SIZE`, bornee a `2000`.
+The maximum chunk size is configurable with `--max_chunk_size` and is capped at
+2000 characters.
 
-Strategies :
+Implemented strategies:
 
-- Python : parse AST et chunk des classes/fonctions top-level. Si le fichier
-  n'est pas parsable, fallback en chunks texte.
-- Markdown : split par sections `#`, `##`, `###`, puis fallback texte si une
-  section est trop grande.
-- Texte : split fixe par caracteres pour les autres fichiers lisibles.
+- Python files: parsed with `ast`; top-level classes and functions are kept as
+  independent chunks when they fit in the size limit.
+- Markdown files: split by headings so documentation sections stay coherent.
+- Other text files: split into fixed-size text chunks.
 
-Des chunks trop petits perdent le contexte et multiplient le bruit. Des chunks
-trop gros diminuent la precision du retrieval et coutent plus cher au LLM.
+Small chunks improve precision but can lose context. Large chunks preserve more
+context but make ranking less precise and increase the prompt size for the LLM.
 
-## Retrieval
+## Retrieval Method
 
-Le retrieval utilise BM25 via `bm25s`.
+The retrieval system uses BM25 through the `bm25s` library. During indexing,
+each chunk is tokenized and stored in a persistent BM25 index under
+`data/processed/bm25_index`.
 
-Tokenisation maison :
+The tokenizer:
 
-- lowercase
-- split `snake_case`
-- split `CamelCase`
-- conservation des identifiants et chiffres utiles
+- lowercases tokens;
+- splits `snake_case`;
+- splits `CamelCase`;
+- keeps useful identifiers and numbers.
 
-Au moment de l'indexation, BM25 indexe :
+The indexed text includes the parent directory and file name in addition to the
+chunk content. This improves retrieval for questions that mention modules,
+classes, endpoints, configuration files, or command names.
 
-```text
-parent_directory + filename + filename + chunk_text
-```
+## Answer Generation
 
-Le nom de fichier est pondere car beaucoup de questions mentionnent des modules,
-fichiers, endpoints ou concepts proches du chemin.
-
-## Answer
-
-Le modele par defaut est :
+The default model is:
 
 ```text
 Qwen/Qwen3-0.6B
 ```
 
-Le modele est charge une seule fois par commande `answer` ou `answer_dataset`.
-Par defaut, `answer` recupere 3 chunks pour rester rapide en usage manuel. Si
-la commande recoit `--k 10`, elle recupere bien 10 chunks. Le contexte envoye
-au modele garde les chunks entiers, avec une limite interne simple :
+The answer command first retrieves chunks, then sends their content to the model
+with instructions to use only the provided sources. The generated answer is kept
+short and source-grounded.
+
+Supported model behavior is intentionally simple: the project relies on the
+default Qwen model required by the subject and does not require a GPU to run,
+although CUDA is used automatically when available.
+
+## Evaluation And Performance
+
+The evaluator computes recall@k by comparing retrieved source ranges with the
+expected source ranges from the answered datasets.
+
+Local public dataset results observed on this repository:
 
 ```text
-10 sources max
-2000 caracteres max par source
+Indexing time: about 6 seconds
+Docs recall@5: 0.86
+Code recall@5: 0.76
+Search throughput: about 100 questions in less than 1 second
 ```
 
-Cela respecte la taille maximale des chunks du sujet et evite de couper les
-reponses utiles situees en fin de source. Le prompt interdit les liens Markdown,
-mais conserve les URLs/endpoints quand la question les demande.
-
-## Performances
-
-Resultats prives avec le script `exam_retrieval.sh` :
+Subject thresholds:
 
 ```text
-Indexing: 5s / limite 300s
-Search 200 questions: 1s / limite 90s
-Docs recall@5: 0.81 / seuil 0.80
-Code recall@5: 0.72 / seuil 0.50
+Docs recall@5 >= 0.80
+Code recall@5 >= 0.50
+Indexing time <= 5 minutes
+Warm retrieval <= 90 seconds for 1000 questions
 ```
 
-Resultats publics observes :
+## Design Decisions
 
-```text
-Docs recall@5: ~0.83
-Code recall@5: ~0.78
-```
+BM25 was chosen instead of embeddings because it is fast, deterministic, easy to
+debug, and does not require model downloads for retrieval. This makes indexing
+and batch search reliable during evaluation.
 
-## Choix et trade-offs
+The main trade-off is lexical dependency: BM25 works best when question terms
+appear in the retrieved files. The custom tokenizer and file-name weighting help
+with code identifiers, module names, and API endpoints.
 
-BM25 a ete choisi plutot qu'un systeme embeddings pour rester simple, rapide et
-robuste sans GPU. Le principal trade-off est que BM25 depend fortement des
-tokens presents dans la question et dans les chunks. Le tokenizer et la
-ponderation du nom de fichier compensent ce probleme pour le code.
+The index is stored on disk so search commands do not need to rebuild it each
+time. This keeps cold start simple and warm retrieval fast.
 
-Le chunking Python AST evite de couper au milieu des fonctions/classes, mais il
-ignore certains morceaux top-level. Ce choix reste volontaire pour garder un
-code simple et de bonnes performances.
+## Challenges Faced
 
-## Commandes principales
+- Code questions often refer to symbols, file names, or implementation details
+  instead of natural language documentation. The tokenizer was adjusted to split
+  identifiers and improve matching.
+- Documentation can contain long sections. Markdown chunking keeps sections
+  readable while respecting the maximum chunk size.
+- Answer generation must stay grounded. The prompt asks the model to use only
+  retrieved context and to avoid unsupported claims.
 
-```bash
-make index
-make search QUERY="How to configure OpenAI server?" K=10
-make search_dataset DATASET_PATH=data/datasets_public/public/AnsweredQuestions/dataset_docs_public.json K=10
-make evaluate STUDENT_RESULTS_PATH=data/output/search_results/dataset_docs_public.json DATASET_PATH=data/datasets_public/public/AnsweredQuestions/dataset_docs_public.json K=10
-make answer QUERY="What is vLLM?" ANSWER_K=3 MAX_NEW_TOKENS=64
-make answer_dataset STUDENT_SEARCH_RESULTS_PATH=data/output/search_results/dataset_docs_public.json MAX_NEW_TOKENS=64
-```
+## Resources
 
-## Test recall complet
+- vLLM documentation: https://docs.vllm.ai/
+- BM25 overview: https://en.wikipedia.org/wiki/Okapi_BM25
+- Pydantic documentation: https://docs.pydantic.dev/
+- Python Fire documentation: https://google.github.io/python-fire/
+- Hugging Face Transformers documentation: https://huggingface.co/docs/transformers
+- Qwen model page: https://huggingface.co/Qwen/Qwen3-0.6B
 
-```bash
-make index OUTPUT_DIR=/tmp/rag-recall
-make search_dataset DATASET_PATH=data/datasets_public/public/AnsweredQuestions/dataset_docs_public.json PROCESSED_DIR=/tmp/rag-recall SAVE_DIRECTORY=/tmp/rag-recall-results K=10
-make evaluate STUDENT_RESULTS_PATH=/tmp/rag-recall-results/dataset_docs_public.json DATASET_PATH=data/datasets_public/public/AnsweredQuestions/dataset_docs_public.json K=10
-make search_dataset DATASET_PATH=data/datasets_public/public/AnsweredQuestions/dataset_code_public.json PROCESSED_DIR=/tmp/rag-recall SAVE_DIRECTORY=/tmp/rag-recall-results K=10
-make evaluate STUDENT_RESULTS_PATH=/tmp/rag-recall-results/dataset_code_public.json DATASET_PATH=data/datasets_public/public/AnsweredQuestions/dataset_code_public.json K=10
-```
+# AI
+
+AI assistance was used to create the readme

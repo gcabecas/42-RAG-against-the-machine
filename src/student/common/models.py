@@ -1,4 +1,6 @@
-from pydantic import BaseModel
+import uuid
+
+from pydantic import BaseModel, Field
 
 
 class MinimalSource(BaseModel):
@@ -8,7 +10,7 @@ class MinimalSource(BaseModel):
 
 
 class UnansweredQuestion(BaseModel):
-    question_id: str
+    question_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     question: str
 
 
@@ -36,6 +38,5 @@ class StudentSearchResults(BaseModel):
     k: int
 
 
-class StudentSearchResultsAndAnswer(BaseModel):
-    search_results: list[MinimalAnswer]
-    k: int
+class StudentSearchResultsAndAnswer(StudentSearchResults):
+    search_results: list[MinimalAnswer]  # type: ignore[assignment]

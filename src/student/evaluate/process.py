@@ -7,6 +7,8 @@ from student.common.models import (
     StudentSearchResults,
 )
 
+MINIMAL_IOU_THRESHOLD = 0.05
+
 
 def source_iou(expected: MinimalSource, predicted: MinimalSource) -> float:
     if expected.file_path != predicted.file_path:
@@ -38,7 +40,7 @@ def question_recall(
         1
         for expected in expected_sources
         if any(
-            source_iou(expected, predicted) > 0.05
+            source_iou(expected, predicted) >= MINIMAL_IOU_THRESHOLD
             for predicted in predicted_sources
         )
     )
