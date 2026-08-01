@@ -1,11 +1,7 @@
-import json
-from pathlib import Path
-
 from tqdm import tqdm
 
 from student.answer.context import make_contexts
 from student.answer.generator import load_answer_model
-from student.answer.process import MAX_ANSWER_CONTEXTS
 from student.answer.process import process as answer_process
 from student.app.base import BaseCli
 from student.common.models import (
@@ -17,32 +13,41 @@ from student.search.process import process as search_process
 
 
 class AnswerCli(BaseCli):
-    DEFAULT_ANSWER_SAVE_DIRECTORY = "data/output/search_results_and_answer"
+    """Expose single and batch grounded generation through Python Fire."""
 
     def answer(
         self,
         query: str,
         k: int = 3,
-        processed_dir: str = BaseCli.DEFAULT_OUTPUT_DIR,
+        processed_dir: str = "data/processed",
         max_new_tokens: int = 128,
     ) -> dict[str, object]:
-        if not query.strip():
-            return self._error("answer", "query must not be empty")
-        try:
-            top_k = self._parse_k(k)
-        except ValueError as error:
-            return self._error("answer", str(error))
-        if top_k > MAX_ANSWER_CONTEXTS:
-            return self._error(
-                "answer",
-                f"k must be at most {MAX_ANSWER_CONTEXTS}",
-            )
+        """Retrieve context and answer one query with Qwen.
 
+        Args:
+            query: Question to answer.
+            k: Maximum number of sources to retrieve.
+            processed_dir: Directory containing persisted index artifacts.
+            max_new_tokens: Maximum number of tokens in the generated answer.
+
+        Returns:
+            A command result containing the grounded answer.
+        """
         try:
-            processed_path = Path(processed_dir)
+            clean_query = self._query(query)
+            top_k = self._positive_int(k, "k")
+            token_limit = self._positive_int(
+                max_new_tokens,
+                "max_new_tokens",
+            )
+            processed_path = self._path(processed_dir, "processed_dir")
             search_index = load_search_index(processed_path)
-            generator = load_answer_model(max_new_tokens)
-            search_result = search_process(query, top_k, search_index)
+            search_result = search_process(
+                clean_query,
+                top_k,
+                search_index,
+            )
+            generator = load_answer_model(token_limit)
             answer = answer_process(
                 search_result,
                 generator,
@@ -61,28 +66,45 @@ class AnswerCli(BaseCli):
     def answer_dataset(
         self,
         student_search_results_path: str,
-        save_directory: str = DEFAULT_ANSWER_SAVE_DIRECTORY,
-        processed_dir: str = BaseCli.DEFAULT_OUTPUT_DIR,
+        save_directory: str,
+        processed_dir: str = "data/processed",
         max_new_tokens: int = 128,
     ) -> dict[str, object]:
-        search_results_path = Path(student_search_results_path)
-        if not search_results_path.is_file():
-            return self._error(
-                "answer_dataset",
-                (
+        """Generate answers for saved retrieval results.
+
+        Args:
+            student_search_results_path: Path to saved retrieval results.
+            save_directory: Directory in which answers are written.
+            processed_dir: Directory containing persisted index artifacts.
+            max_new_tokens: Maximum number of tokens generated per answer.
+
+        Returns:
+            A summary containing the output path and question count.
+        """
+        try:
+            token_limit = self._positive_int(
+                max_new_tokens,
+                "max_new_tokens",
+            )
+            search_results_path = self._path(
+                student_search_results_path,
+                "student_search_results_path",
+            )
+            save_dir = self._path(save_directory, "save_directory")
+            processed_path = self._path(processed_dir, "processed_dir")
+            if not search_results_path.is_file():
+                raise ValueError(
                     "student_search_results_path does not exist or is not "
                     f"a file: {search_results_path}"
-                ),
-            )
-
-        try:
+                )
             student_results = StudentSearchResults.model_validate_json(
-                search_results_path.read_text()
+                search_results_path.read_text(encoding="utf-8")
             )
+            self._positive_int(student_results.k, "k")
             context_by_source = make_contexts(
-                load_chunks(Path(processed_dir))
+                load_chunks(processed_path)
             )
-            generator = load_answer_model(max_new_tokens)
+            generator = load_answer_model(token_limit)
             answers = [
                 answer_process(
                     search_result,
@@ -97,12 +119,13 @@ class AnswerCli(BaseCli):
             ]
             output = StudentSearchResultsAndAnswer(
                 search_results=answers,
-                k=min(student_results.k, MAX_ANSWER_CONTEXTS),
-            ).model_dump()
-            save_path = Path(save_directory) / search_results_path.name
+                k=student_results.k,
+            )
+            save_path = save_dir / search_results_path.name
             save_path.parent.mkdir(parents=True, exist_ok=True)
             save_path.write_text(
-                json.dumps(output, ensure_ascii=False, indent=4)
+                output.model_dump_json(indent=4),
+                encoding="utf-8",
             )
         except Exception as error:
             return self._error("answer_dataset", str(error))
@@ -112,7 +135,7 @@ class AnswerCli(BaseCli):
             "status": "ok",
             "student_search_results_path": search_results_path.as_posix(),
             "save_path": save_path.as_posix(),
-            "processed_dir": Path(processed_dir).as_posix(),
+            "processed_dir": processed_path.as_posix(),
             "k": student_results.k,
             "questions": len(student_results.search_results),
         }

@@ -7,12 +7,9 @@ from student.app.search import SearchCli
 
 
 class StudentCli(IndexCli, SearchCli, EvaluateCli, AnswerCli):
-    pass
+    """Combine every mandatory command in one Python Fire CLI."""
 
 
 def main() -> None:
-    fire_lib.Fire(StudentCli)
-
-
-if __name__ == "__main__":
-    main()
+    """Run the project command-line interface."""
+    fire_lib.Fire(StudentCli())

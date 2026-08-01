@@ -7,10 +7,17 @@ from student.common.models import (
     StudentSearchResults,
 )
 
-MINIMAL_IOU_THRESHOLD = 0.05
-
 
 def source_iou(expected: MinimalSource, predicted: MinimalSource) -> float:
+    """Compute source overlap when both paths are identical.
+
+    Args:
+        expected: Reference source range.
+        predicted: Retrieved source range.
+
+    Returns:
+        Intersection over union, or zero for different files.
+    """
     if expected.file_path != predicted.file_path:
         return 0.0
     intersection = max(
@@ -34,13 +41,22 @@ def question_recall(
     expected_sources: list[MinimalSource],
     predicted_sources: list[MinimalSource],
 ) -> float:
+    """Compute recall for one question at a chosen result limit.
+
+    Args:
+        expected_sources: Reference source ranges.
+        predicted_sources: Retrieved source ranges to evaluate.
+
+    Returns:
+        Fraction of reference sources matched by a prediction.
+    """
     if not expected_sources:
         return 1.0
     found = sum(
         1
         for expected in expected_sources
         if any(
-            source_iou(expected, predicted) >= MINIMAL_IOU_THRESHOLD
+            source_iou(expected, predicted) >= 0.05
             for predicted in predicted_sources
         )
     )
@@ -48,15 +64,28 @@ def question_recall(
 
 
 def process(
-    student_results_path: Path,
+    student_search_results_path: Path,
     dataset_path: Path,
     k: int,
 ) -> dict[str, object]:
+    """Compute local recall metrics for saved retrieval results.
+
+    Args:
+        student_search_results_path: Path to student retrieval results.
+        dataset_path: Path to the answered reference dataset.
+        k: Maximum number of predictions considered per question.
+
+    Returns:
+        Evaluation metadata and recall metrics.
+
+    Raises:
+        ValueError: If the reference dataset contains unanswered questions.
+    """
     student_results = StudentSearchResults.model_validate_json(
-        student_results_path.read_text()
+        student_search_results_path.read_text(encoding="utf-8")
     )
     dataset = RagDataset.model_validate_json(
-        dataset_path.read_text()
+        dataset_path.read_text(encoding="utf-8")
     )
     predicted_by_id = {
         result.question_id: result.retrieved_sources
@@ -89,7 +118,9 @@ def process(
         for limit, values in recalls.items()
     }
     return {
-        "student_results_path": student_results_path.as_posix(),
+        "student_search_results_path": (
+            student_search_results_path.as_posix()
+        ),
         "dataset_path": dataset_path.as_posix(),
         "k": k,
         "questions": len(dataset.rag_questions),

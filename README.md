@@ -20,78 +20,89 @@ Install the dependencies:
 uv sync
 ```
 
-Prepare the vLLM repository if it is not already extracted:
+Extract the supplied v2 resources directly into the following layout:
 
-```bash
-mkdir -p data/raw
-unzip -q -n info/given/vllm-0.10.1.zip -d data/raw
+```text
+data/
+├── raw/
+│   └── vllm-0.10.1/
+└── datasets/
+    ├── AnsweredQuestions/
+    │   ├── dataset_code_public.json
+    │   └── dataset_docs_public.json
+    └── UnansweredQuestions/
+        ├── dataset_code_public.json
+        └── dataset_docs_public.json
 ```
+
+The supplied corpus, datasets, generated index, model weights, and outputs must
+remain outside Git. The repository already ignores `data/`.
 
 Build the index:
 
 ```bash
-uv run python -m student index --max_chunk_size 2000
+uv run python -m src index --max_chunk_size 2000
 ```
 
 Run a single search:
 
 ```bash
-uv run python -m student search "How to configure OpenAI server?" --k 10
+uv run python -m src search "How to configure OpenAI server?" --k 10
 ```
 
 Answer a single question:
 
 ```bash
-uv run python -m student answer "How to configure OpenAI server?" --k 10
+uv run python -m src answer "How to configure OpenAI server?" --k 10
 ```
 
 Search a dataset:
 
 ```bash
-uv run python -m student search_dataset \
-  --dataset_path data/datasets_public/public/AnsweredQuestions/dataset_docs_public.json \
+uv run python -m src search_dataset \
+  --dataset_path data/datasets/UnansweredQuestions/dataset_docs_public.json \
   --k 10 \
-  --save_directory data/output/search_results
+  --save_directory data/output/search_results/UnansweredQuestions
 ```
 
 Evaluate search results:
 
 ```bash
-uv run python -m student evaluate \
-  --student_results_path data/output/search_results/dataset_docs_public.json \
-  --dataset_path data/datasets_public/public/AnsweredQuestions/dataset_docs_public.json \
+uv run python -m src evaluate \
+  --student_search_results_path data/output/search_results/UnansweredQuestions/dataset_docs_public.json \
+  --dataset_path data/datasets/AnsweredQuestions/dataset_docs_public.json \
   --k 10
 ```
 
 Generate answers from search results:
 
 ```bash
-uv run python -m student answer_dataset \
-  --student_search_results_path data/output/search_results/dataset_docs_public.json \
-  --save_directory data/output/search_results_and_answer
+uv run python -m src answer_dataset \
+  --student_search_results_path data/output/search_results/UnansweredQuestions/dataset_docs_public.json \
+  --save_directory data/output/search_results_and_answer/UnansweredQuestions
 ```
 
-The Makefile also exposes shortcuts:
+The Makefile exposes the five mandatory project rules:
 
 ```bash
 make install
-make index
-make search QUERY="How to configure OpenAI server?" K=10
-make search_dataset DATASET_PATH=data/datasets_public/public/AnsweredQuestions/dataset_docs_public.json K=10
-make evaluate STUDENT_RESULTS_PATH=data/output/search_results/dataset_docs_public.json DATASET_PATH=data/datasets_public/public/AnsweredQuestions/dataset_docs_public.json K=10
-make answer QUERY="What is vLLM?" ANSWER_K=10
+make run
+make debug
+make clean
 make lint
 ```
 
 ## System Architecture
 
-The pipeline is split into five main parts:
+The pipeline is split into six main parts:
 
 - `src/student/index/`: reads files, chunks them, and builds the BM25 index.
 - `src/student/search/`: loads the saved index and retrieves top-k chunks.
 - `src/student/evaluate/`: computes recall@k against annotated datasets.
 - `src/student/answer/`: builds the prompt context and calls Qwen.
 - `src/student/app/`: exposes the command-line interface with Python Fire.
+- `src/__main__.py`: exposes the required `python -m src` entry point and
+  delegates command parsing to the Python Fire CLI.
 
 Data flow:
 
@@ -112,8 +123,8 @@ The maximum chunk size is configurable with `--max_chunk_size` and is capped at
 
 Implemented strategies:
 
-- Python files: parsed with `ast`; top-level classes and functions are kept as
-  independent chunks when they fit in the size limit.
+- Python files: parsed with `ast`; top-level symbol boundaries guide grouping
+  while imports, constants, decorators, and module-level code remain covered.
 - Markdown files: split by headings so documentation sections stay coherent.
 - Other text files: split into fixed-size text chunks.
 
@@ -153,18 +164,23 @@ Supported model behavior is intentionally simple: the project relies on the
 default Qwen model required by the subject and does not require a GPU to run,
 although CUDA is used automatically when available.
 
+A CPU smoke test with the locked dependencies successfully loaded the model and
+generated an answer grounded in a retrieved vLLM source.
+
 ## Evaluation And Performance
 
 The evaluator computes recall@k by comparing retrieved source ranges with the
 expected source ranges from the answered datasets.
 
-Local public dataset results observed on this repository:
+Local public dataset results observed with the v2 resources:
 
 ```text
-Indexing time: about 6 seconds
-Docs recall@5: 0.86
-Code recall@5: 0.76
-Search throughput: about 100 questions in less than 1 second
+Indexed files: 2818
+Generated chunks: 17169
+Indexing time: about 10 seconds
+Docs recall@5: 0.82
+Code recall@5: 0.828
+Search throughput: 199 questions in about 5 seconds
 ```
 
 Subject thresholds:
@@ -173,7 +189,7 @@ Subject thresholds:
 Docs recall@5 >= 0.80
 Code recall@5 >= 0.50
 Indexing time <= 5 minutes
-Warm retrieval <= 90 seconds for 1000 questions
+Warm retrieval <= 90 seconds for 200 questions
 ```
 
 ## Design Decisions
@@ -208,6 +224,6 @@ time. This keeps cold start simple and warm retrieval fast.
 - Hugging Face Transformers documentation: https://huggingface.co/docs/transformers
 - Qwen model page: https://huggingface.co/Qwen/Qwen3-0.6B
 
-# AI
+## AI
 
-AI assistance was used to create the readme
+  for readme and docstring

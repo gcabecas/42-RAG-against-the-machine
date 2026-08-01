@@ -1,24 +1,30 @@
-import enum
 from pathlib import Path
 
 from pydantic import BaseModel
 
-
-class FileType(str, enum.Enum):
-    PYTHON = "python"
-    MARKDOWN = "markdown"
-    TEXT = "text"
+from student.common.models import MinimalSource
 
 
 class File(BaseModel):
+    """Represent one readable corpus file.
+
+    Args:
+        path: Path of the file relative to the current project.
+        text: Decoded file contents.
+    """
+
     path: Path
-    type: FileType
     text: str
 
 
-class Chunk(BaseModel):
-    chunk_id: str
-    file_path: str
+class Chunk(MinimalSource):
+    """Extend a source location with its indexed text.
+
+    Args:
+        file_path: Corpus-relative path to the source file.
+        first_character_index: Start offset of the source range.
+        last_character_index: End offset of the source range.
+        text: Exact source text covered by the inherited location.
+    """
+
     text: str
-    first_character_index: int
-    last_character_index: int

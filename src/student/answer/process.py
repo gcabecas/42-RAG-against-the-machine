@@ -1,23 +1,30 @@
-from student.answer.context import ContextBySource, load_context
+from student.answer.context import load_context
 from student.answer.generator import AnswerGenerator
 from student.common.models import MinimalAnswer, MinimalSearchResults
-
-MAX_ANSWER_CONTEXTS = 10
 
 
 def process(
     search_result: MinimalSearchResults,
     generator: AnswerGenerator,
-    context_by_source: ContextBySource,
+    context_by_source: dict[tuple[str, int, int], str],
 ) -> MinimalAnswer:
-    selected_sources = search_result.retrieved_sources[:MAX_ANSWER_CONTEXTS]
+    """Generate an answer while preserving every retrieved source.
+
+    Args:
+        search_result: Retrieval result to answer.
+        generator: Loaded model wrapper used for generation.
+        context_by_source: Indexed text keyed by source coordinates.
+
+    Returns:
+        The retrieval result extended with a generated answer.
+    """
     contexts = [
-        load_context(source, context_by_source)
-        for source in selected_sources
+        f"{source.file_path}\n{load_context(source, context_by_source)}"
+        for source in search_result.retrieved_sources[:10]
     ]
     return MinimalAnswer(
         question_id=search_result.question_id,
-        question_str=search_result.question_str,
-        retrieved_sources=selected_sources,
-        answer=generator.generate(search_result.question_str, contexts),
+        question=search_result.question,
+        retrieved_sources=search_result.retrieved_sources,
+        answer=generator.generate(search_result.question, contexts),
     )

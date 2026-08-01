@@ -1,33 +1,40 @@
 from pathlib import Path
 
-from student.index.models import File, FileType
-
-
-def file_type(path: Path) -> FileType:
-    suffix = path.suffix.lower()
-    if suffix == ".py":
-        return FileType.PYTHON
-    if suffix == ".md":
-        return FileType.MARKDOWN
-    return FileType.TEXT
+from student.index.models import File
 
 
 def read_text(path: Path) -> str | None:
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return None
-    except UnicodeDecodeError:
-        return None
+    """Read UTF-8 text without changing character offsets.
 
-    return text.replace("\r\n", "\n").replace("\r", "\n")
+    Args:
+        path: File to read.
+
+    Returns:
+        Decoded text, or ``None`` when the file cannot be read.
+    """
+    try:
+        with path.open("r", encoding="utf-8", newline="") as stream:
+            return stream.read()
+    except (OSError, UnicodeDecodeError):
+        return None
 
 
 def list_file(root: Path) -> list[File]:
+    """Load every readable UTF-8 file below a corpus root.
+
+    Args:
+        root: Root directory of the corpus.
+
+    Returns:
+        Readable corpus files sorted by path.
+
+    Raises:
+        ValueError: If the root cannot be scanned.
+    """
     if not root.is_dir():
         raise ValueError(f"repository root does not exist: {root}")
 
-    file_list = []
+    file_list: list[File] = []
 
     try:
         paths = sorted(root.rglob("*"))
@@ -42,5 +49,5 @@ def list_file(root: Path) -> list[File]:
         text = read_text(path)
         if text is None:
             continue
-        file_list.append(File(path=path, type=file_type(path), text=text))
+        file_list.append(File(path=path, text=text))
     return file_list

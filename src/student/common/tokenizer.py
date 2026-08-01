@@ -1,33 +1,34 @@
-from functools import lru_cache
 import re
 
 
-def split_camel_case(token: str) -> list[str]:
-    pattern = r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"
-    return re.split(pattern, token)
-
-
-@lru_cache(maxsize=100000)
-def token_parts(token: str) -> tuple[str, ...]:
-    parts: list[str] = []
-    seen: set[str] = set()
-
-    def add(value: str) -> None:
-        value = value.strip("_").casefold()
-        if len(value) > 1 and value not in seen:
-            seen.add(value)
-            parts.append(value)
-
-    add(token)
-    for snake_part in token.split("_"):
-        add(snake_part)
-        for camel_part in split_camel_case(snake_part):
-            add(camel_part)
-    return tuple(parts)
-
-
 def tokenize(text: str) -> list[str]:
+    """Tokenize natural language and code identifiers for BM25.
+
+    Args:
+        text: Natural-language or source-code text to tokenize.
+
+    Returns:
+        Normalized lexical tokens.
+    """
     tokens: list[str] = []
     for token in re.findall(r"[A-Za-z0-9_]+", text):
-        tokens.extend(token_parts(token))
+        candidates = [token]
+        for snake_part in token.split("_"):
+            candidates.append(snake_part)
+            candidates.extend(
+                re.split(
+                    (
+                        r"(?<=[a-z0-9])(?=[A-Z])"
+                        r"|(?<=[A-Z])(?=[A-Z][a-z])"
+                    ),
+                    snake_part,
+                )
+            )
+
+        seen: set[str] = set()
+        for candidate in candidates:
+            normalized = candidate.strip("_").casefold()
+            if len(normalized) > 1 and normalized not in seen:
+                seen.add(normalized)
+                tokens.append(normalized)
     return tokens
